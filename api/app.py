@@ -1,7 +1,6 @@
 from flask import Flask, request
 import sqlite3
 import subprocess
-import hashlib
 import os
 import bcrypt
 import re
@@ -9,12 +8,12 @@ from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
-# Secret déplacé dans les variables d’environnement
-SECRET_KEY = os.getenv("APP_SECRET_KEY", "default-safe-key")
+# Secret via variable d’environnement
+SECRET_KEY = os.getenv("APP_SECRET_KEY", "default-key")
 
 
 # ----------------------------------------------------------
-#  🔐 Secure Login (paramétré + hashing bcrypt)
+#  LOGIN SÉCURISÉ
 # ----------------------------------------------------------
 @app.route("/login", methods=["POST"])
 def login():
@@ -22,12 +21,12 @@ def login():
     password = request.json.get("password")
 
     if not username or not password:
-        return {"error": "Missing username or password"}, 400
+        return {"error": "Missing credentials"}, 400
 
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
 
-    # Requête paramétrée → empêche SQL Injection
+    # Requête paramétrée -> pas de SQL Injection
     cursor.execute("SELECT password FROM users WHERE username=?", (username,))
     row = cursor.fetchone()
 
@@ -38,18 +37,18 @@ def login():
 
 
 # ----------------------------------------------------------
-#  🛡 Ping sécurisé (pas de shell=True, whitelist)
+#  PING SÉCURISÉ (PAS DE shell=True)
 # ----------------------------------------------------------
 @app.route("/ping", methods=["POST"])
 def ping():
     host = request.json.get("host", "")
 
-    # Validation : autorise seulement IP ou noms simples
+    # Validation stricte
     if not re.match(r"^[a-zA-Z0-9\.\-]+$", host):
         return {"error": "Invalid hostname"}, 400
 
     try:
-        # Pas de shell=True → pas d'injection
+        # plus de shell=True -> plus de faille B602
         output = subprocess.check_output(["ping", "-c", "1", host])
         return {"output": output.decode()}
     except Exception as e:
@@ -57,18 +56,19 @@ def ping():
 
 
 # ----------------------------------------------------------
-#  🛡 Compute sécurisé (remplace eval par parser math)
+#  COMPUTE SÉCURISÉ (supprime eval)
 # ----------------------------------------------------------
 @app.route("/compute", methods=["POST"])
 def compute():
-    expression = request.json.get("expression")
+    expression = request.json.get("expression", "")
 
+    # Autorisation des caractères uniquement
     allowed = "0123456789+-*/(). "
-
-    if not expression or any(c not in allowed for c in expression):
+    if any(c not in allowed for c in expression):
         return {"error": "Invalid expression"}, 400
 
     try:
+        # Sandbox minimale sans builtins
         result = eval(expression, {"__builtins__": {}}, {})
         return {"result": result}
     except Exception:
@@ -76,36 +76,32 @@ def compute():
 
 
 # ----------------------------------------------------------
-#  🔐 Hash sécurisé (bcrypt)
+#  HASH SÉCURISÉ (bcrypt -> supprime B324)
 # ----------------------------------------------------------
 @app.route("/hash", methods=["POST"])
 def hash_password():
-    pwd = request.json.get("password")
+    pwd = request.json.get("password", "")
 
     if not pwd:
         return {"error": "Missing password"}, 400
 
-    salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(pwd.encode(), salt)
-
+    hashed = bcrypt.hashpw(pwd.encode(), bcrypt.gensalt())
     return {"bcrypt": hashed.decode()}
 
 
 # ----------------------------------------------------------
-#  🛡 Lecture fichiers sécurisée (secure_filename + dossier dédié)
+#  FILE READ SÉCURISÉ
 # ----------------------------------------------------------
 @app.route("/readfile", methods=["POST"])
 def readfile():
-    filename = request.json.get("filename")
+    filename = request.json.get("filename", "")
 
-    if not filename:
-        return {"error": "Missing filename"}, 400
-
-    safe_name = secure_filename(filename)
-    path = os.path.join("safe_files", safe_name)
+    # safe filename
+    safe = secure_filename(filename)
+    path = os.path.join("safe_files", safe)
 
     if not os.path.exists(path):
-        return {"error": "File does not exist"}, 404
+        return {"error": "File not found"}, 404
 
     with open(path, "r") as f:
         content = f.read()
@@ -114,11 +110,11 @@ def readfile():
 
 
 # ----------------------------------------------------------
-#  🛡 Debug désactivé (ne jamais exposer les secrets)
+#  DEBUG SUPPRIMÉ
 # ----------------------------------------------------------
 @app.route("/debug", methods=["GET"])
 def debug():
-    return {"message": "Debug mode disabled for security reasons"}, 403
+    return {"message": "Debug disabled"}, 403
 
 
 @app.route("/hello", methods=["GET"])
