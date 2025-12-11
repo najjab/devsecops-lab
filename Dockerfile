@@ -1,11 +1,16 @@
-FROM python:3.9
+FROM python:3.9-alpine
 
 WORKDIR /app
 
+# Installer les dépendances nécessaires (build + crypto)
+RUN apk add --no-cache \
+    build-base \
+    libffi-dev \
+    openssl-dev
+
 COPY ../api .
 
-# Installation des dépendances sécurisées
-RUN pip install flask bcrypt werkzeug
+RUN pip install --no-cache-dir flask bcrypt werkzeug
 
 EXPOSE 5000
 
